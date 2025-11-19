@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 from db import db
 
-## Defines User model in table
+# Defines User model in table
 class User(db.Model):
     __tablename__ = "users"
     id = db.Column(db.Integer, primary_key=True)
@@ -12,7 +12,7 @@ class User(db.Model):
     solves = db.relationship("Solve", backref="user", lazy=True)
 
 
-## Defines Solve model in table
+# Defines Solve model in table
 class Solve(db.Model):
     __tablename__ = "solves"
     id = db.Column(db.Integer, primary_key=True)
