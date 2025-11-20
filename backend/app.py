@@ -3,10 +3,22 @@ from config import Config
 from db import db
 from auth import auth_bp
 from solves import solves_bp
+from flask_cors import CORS  # <-- important
 
 def create_app():
     app = Flask(__name__)
     app.config.from_object(Config)
+
+    # Allow your Vite dev server to call the API
+    # Vite default: http://localhost:5173
+    CORS(
+        app,
+        resources={r"/api/*": {
+            "origins": "*",
+            "methods": ["GET", "POST", "OPTIONS"],
+            "allow_headers": ["Content-Type", "Authorization"],
+        }},
+    )
 
     db.init_app(app)
 
