@@ -67,10 +67,12 @@ export const SolverPage: React.FC = () => {
       const stateString = cubeState.join('');
       const result = await solveCube(stateString, 'manual');
       setSolution(result);
-    } catch (err: unknown) {
+    } 
+    catch (err: unknown) {
       if (err && typeof err === 'object' && 'response' in err) {
-        const response = (err as { response?: { data?: { message?: string } } }).response;
-        setError(response?.data?.message || 'Failed to solve cube. Please check your input.');
+        const response = (err as { response?: { data?: { error?: string; message?: string } } }).response;
+        const msg = response?.data?.error || response?.data?.message;
+        setError(msg || 'Failed to solve cube. Please check your input.');
       } else {
         setError('Failed to solve cube. Please check your input.');
       }

@@ -3,7 +3,7 @@ from config import Config
 from db import db
 from auth import auth_bp
 from solves import solves_bp
-from flask_cors import CORS  # <-- important
+from flask_cors import CORS
 
 def create_app():
     app = Flask(__name__)
