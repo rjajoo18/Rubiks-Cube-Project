@@ -4,7 +4,7 @@ from db import db
 from auth import auth_bp
 from solves import solves_bp
 from flask_cors import CORS
-# from dashboard import dashbord_bp
+from dashboard import dashboard_bp
 
 def create_app():
     app = Flask(__name__)
@@ -25,7 +25,7 @@ def create_app():
 
     app.register_blueprint(auth_bp, url_prefix="/api/auth")
     app.register_blueprint(solves_bp, url_prefix="/api")
-    # app.register_blueprint(dashbord_bp, url_prefix="/api")
+    app.register_blueprint(dashboard_bp, url_prefix="/api")
 
     @app.route("/api/health")
     def health():
