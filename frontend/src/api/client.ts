@@ -128,6 +128,30 @@ class APIClient {
     const response = await this.client.get('/dashboard/summary', { params: { range } });
     return response.data;
   }
+
+  // Onboarding endpoints
+  async setSelfReportedAverage(avgSeconds: number): Promise<{
+    skillSource: string;
+    selfReported333AvgMs: number;
+    skillPriorMs: number;
+    }> {
+    const response = await this.client.post('/auth/me/skill/self-reported', { avgSeconds });
+    return response.data;
+  }
+
+  async linkWca(wcaId: string): Promise<{
+    wcaId: string;
+    wca333AvgMs: number | null;
+    wca333SingleMs: number | null;
+    skillSource: string;
+    skillPriorMs: number | null;
+    }> {
+    const response = await this.client.post('/auth/me/skill/wca', { wcaId });
+    return response.data;
+  }
 }
+
+
+
 
 export const apiClient = new APIClient();

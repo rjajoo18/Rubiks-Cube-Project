@@ -23,7 +23,7 @@ export const SignupPage: React.FC = () => {
 
     try {
       await signup(email, password, name);
-      navigate('/dashboard');
+      navigate('/onboarding');
     } catch (err: unknown) {
       if (err && typeof err === 'object' && 'response' in err) {
         const response = (err as { response?: { data?: { message?: string } } }).response;

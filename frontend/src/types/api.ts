@@ -3,6 +3,13 @@ export interface User {
   email: string;
   name: string;
   created_at: string;
+  wcaId?: string | null;
+  wca333AvgMs?: number | null;
+  wca333SingleMs?: number | null;
+  selfReported333AvgMs?: number | null;
+  skillSource?: string | null;
+  wcaLastFetchedAt?: string | null;
+  skillPriorMs?: number | null;
 }
 
 export interface Solve {

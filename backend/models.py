@@ -10,6 +10,25 @@ class User(db.Model):
     password_hash = db.Column(db.String(128), nullable=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     solves = db.relationship("Solve", backref="user", lazy=True)
+    wca_id = db.Column(db.String(100), nullable=True)
+    wca_333_avg_ms = db.Column(db.Integer, nullable=True)
+    wca_333_single_ms = db.Column(db.Integer, nullable=True)
+    self_reported_333_avg_ms = db.Column(db.Integer, nullable=True)
+    skill_source = db.Column(db.String(100), nullable=True, default="unknown")
+    wca_last_fetched_at = db.Column(db.DateTime(timezone=True), nullable=True)
+
+
+    def get_skill_prior_ms(self) -> int | None:
+        """
+        Returns the best available estimate of the user's 3x3 average in milliseconds.
+        This is the number you'll feed into ML as a "skill prior" feature.
+        """
+        if self.skill_source == "wca" and self.wca_333_avg_ms:
+            return self.wca_333_avg_ms
+        if self.skill_source == "self_reported" and self.self_reported_333_avg_ms:
+            return self.self_reported_333_avg_ms
+        # fallback: if fields exist but source wasn't set properly
+        return self.wca_333_avg_ms or self.self_reported_333_avg_ms
 
 
 # Defines Solve model in table

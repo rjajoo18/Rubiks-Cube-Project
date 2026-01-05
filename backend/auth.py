@@ -4,9 +4,10 @@ from db import db
 from models import User
 import bcrypt
 import jwt
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from config import Config
 from functools import wraps
+from services.wca_client import WcaClient, WcaClientError
 
 # This blueprint will handle all /api/auth routes
 auth_bp = Blueprint("auth", __name__)
@@ -145,6 +146,92 @@ def me():
             "id": user.id,
             "email": user.email,
             "name": user.name,
-            "created_at": user.created_at.isoformat()
+            "created_at": user.created_at.isoformat(),
+            "wcaId": user.wca_id,
+            "wca333AvgMs": user.wca_333_avg_ms,
+            "wca333SingleMs": user.wca_333_single_ms,
+            "selfReported333AvgMs": user.self_reported_333_avg_ms,
+            "skillSource": user.skill_source,
+            "wcaLastFetchedAt": user.wca_last_fetched_at.isoformat() if user.wca_last_fetched_at else None,
+            "skillPriorMs": user.get_skill_prior_ms(),
         }
     }), 200
+
+# --------------------------
+# POST /me/skill/self-reported
+# --------------------------
+@auth_bp.route("/me/skill/self-reported", methods=["POST"])
+@require_auth
+def set_self_reported_skill():
+    user = request.current_user
+    data = request.get_json() or {}
+
+    avg_seconds = data.get("avgSeconds")
+    avg_ms = data.get("avgMs")
+
+    if avg_ms is None:
+        if avg_seconds is None:
+            return jsonify({"error": "avgMs or avgSeconds is required"}), 400
+        try:
+            avg_ms = int(float(avg_seconds) * 1000)
+        except (ValueError, TypeError):
+            return jsonify({"error": "Invalid avgSeconds value"}), 400
+
+    else:
+        try:
+            avg_ms = int(avg_ms)
+        except (ValueError, TypeError):
+            return jsonify({"error": "avgMs must be an integer"}), 400
+        
+    user.self_reported_333_avg_ms = avg_ms
+    user.skill_source = "self_reported"
+
+    db.session.commit()
+
+    return jsonify({
+        "success": True,
+        "skillSource": user.skill_source,
+        "selfReported333AvgMs": user.self_reported_333_avg_ms,
+        "skillPriorMs": user.get_skill_prior_ms(),
+    }), 200
+
+# --------------------------
+# POST /me/skill/wca
+# --------------------------
+@auth_bp.route("/me/skill/wca", methods=["POST"])
+@require_auth
+def set_wca_skill():
+    user = request.current_user
+    data = request.get_json() or {}
+
+    wca_id = (data.get("wcaId") or "").strip()
+    if not wca_id:
+        return jsonify({"error": "wcaId is required"}), 400
+    
+    if len(wca_id) < 6 or len(wca_id) > 12:
+        return jsonify({"error": "Invalid wcaId format"}), 400
+    
+    client = WcaClient(base_url=Config.WCA_API_BASE_URL)
+    try:
+        stats = client.get_333_stats(wca_id)
+    except WcaClientError as e:
+        return jsonify({"error": str(e)}), 400
+    
+    user.wca_id = wca_id
+    user.wca_333_avg_ms = stats.avg_ms
+    user.wca_333_single_ms = stats.single_ms
+    user.skill_source = "wca"
+    user.wca_last_fetched_at = datetime.now(timezone.utc)
+
+    db.session.commit()
+
+    return jsonify({
+        "success": True,
+        "wcaId": user.wca_id,
+        "wca333AvgMs": user.wca_333_avg_ms,
+        "wca333SingleMs": user.wca_333_single_ms,
+        "skillSource": user.skill_source,
+        "wcaLastFetchedAt": user.wca_last_fetched_at.isoformat() if user.wca_last_fetched_at else None,
+        "skillPriorMs": user.get_skill_prior_ms(),
+    }), 200
+
