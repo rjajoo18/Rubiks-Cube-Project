@@ -110,7 +110,8 @@ class APIClient {
   }
 
   async scoreSolve(id: number): Promise<{ mlScore: number; scoreVersion: string }> {
-    const response = await this.client.post(`/solves/${id}/score`);
+    // send {} explicitly (some servers expect a JSON body)
+    const response = await this.client.post(`/solves/${id}/score`, {});
     return response.data;
   }
 
@@ -150,8 +151,5 @@ class APIClient {
     return response.data;
   }
 }
-
-
-
 
 export const apiClient = new APIClient();

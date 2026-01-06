@@ -4,6 +4,7 @@ from collections import Counter
 import random
 import base64
 
+from ml.inference.scorer import score_solve_gbm
 from db import db
 from models import Solve
 from auth import require_auth
@@ -602,9 +603,10 @@ def score_solve(solve_id: int):
     if not solve:
         return jsonify({"error": "Solve not found"}), 404
     
-    # Return heuristic score (placeholder for ML model later)
-    solve.ml_score = float(heuristic_score(solve))
-    solve.score_version = "heuristic_v0"
+    score, version = score_solve_gbm(db.session, user, solve)
+
+    solve.ml_score = score
+    solve.score_version = version
     db.session.commit()
 
     return jsonify(

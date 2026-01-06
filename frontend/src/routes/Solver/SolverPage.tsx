@@ -78,6 +78,9 @@ export const SolverPage: React.FC = () => {
       setLoading(true);
       setError('');
       try {
+        // IMPORTANT:
+        // Keep penalty consistent with backend + ML pipeline:
+        // send "OK" / "+2" / "DNF" (not null)
         const response = await apiClient.createSolve({
           scramble,
           timeMs,
@@ -88,6 +91,7 @@ export const SolverPage: React.FC = () => {
           state: scrambleState || undefined,
         });
 
+        // Show solve immediately
         setLastSolve(response.solve);
         setLiveStats(response.liveStats);
 
@@ -96,6 +100,23 @@ export const SolverPage: React.FC = () => {
         setPenalty('OK');
         setPendingTimeMs(null);
 
+        // Kick off scoring in the background (do NOT block UX)
+        // If this fails, the "Score This Solve" button still works.
+        try {
+          const scoreRes = await apiClient.scoreSolve(response.solve.id);
+          setLastSolve((prev) =>
+            prev && prev.id === response.solve.id
+              ? { ...prev, mlScore: scoreRes.mlScore, scoreVersion: scoreRes.scoreVersion }
+              : prev
+          );
+          // (optional) refresh stats so avgScore updates quickly
+          // If your live stats already include scoreStats, this keeps it fresh:
+          void loadStats();
+        } catch (err) {
+          console.error('Auto-scoring failed:', err);
+          // Don't hard-error; user can manually score
+        }
+
         await loadNewScramble();
       } catch {
         setError('Failed to save solve');
@@ -103,7 +124,7 @@ export const SolverPage: React.FC = () => {
         setLoading(false);
       }
     },
-    [scramble, penalty, notes, scrambleState, loadNewScramble]
+    [scramble, penalty, notes, scrambleState, loadNewScramble, loadStats]
   );
 
   const startTimer = useCallback(() => {
@@ -224,6 +245,7 @@ export const SolverPage: React.FC = () => {
           ? { ...prev, mlScore: result.mlScore, scoreVersion: result.scoreVersion }
           : prev
       );
+      void loadStats();
     } catch {
       setError('Failed to score solve');
     }

@@ -1,0 +1,23 @@
+{
+  "version": "gbm_v1",
+  "target": "y_score",
+  "features": [
+    "effective_time_ms",
+    "has_plus2",
+    "ao5_ms",
+    "ao12_ms",
+    "baseline50_ms",
+    "std10_ms",
+    "ratio_vs_baseline",
+    "delta_vs_baseline_ms",
+    "skill_prior_ms",
+    "num_moves",
+    "solve_index"
+  ],
+  "dataset_path": "ml\\training\\datasets\\solves_training_v1.csv",
+  "notes": {
+    "label": "Option 2 personalized score vs baseline (ratio mapping)",
+    "dnf_policy": "DNF excluded from training; inference returns 0 (v1)",
+    "penalty_policy": "+2 adds 2000ms"
+  }
+}
