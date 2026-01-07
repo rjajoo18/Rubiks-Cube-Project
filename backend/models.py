@@ -16,7 +16,9 @@ class User(db.Model):
     self_reported_333_avg_ms = db.Column(db.Integer, nullable=True)
     skill_source = db.Column(db.String(100), nullable=True, default="unknown")
     wca_last_fetched_at = db.Column(db.DateTime(timezone=True), nullable=True)
-
+    solves_since_retrain = db.Column(db.String(100), nullable=False, default="0")
+    last_retrain_at = db.Column(db.DateTime(timezone=True), nullable=True)
+    active_model_version = db.Column(db.String(100), nullable=False, default="global_v2")
 
     def get_skill_prior_ms(self) -> int | None:
         """
@@ -55,4 +57,30 @@ class Solve(db.Model):
     event = db.Column(db.String(20), nullable=False, default="3x3")
 
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    expected_time_ms = db.Column(db.Integer, nullable=True)
+    dnf_risk = db.Column(db.Float, nullable=True)
+    plus2_risk = db.Column(db.Float, nullable=True)
+
+
+class MLRetrainJob(db.Model):
+    """
+    Represents a request to retrain models for a specific user.
+    We store these in the DB so retraining can happen safely OUTSIDE of Flask requests.
+    """
+    __tablename__ = "ml_retrain_jobs"
+
+    id = db.Column(db.BigInteger, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False)
+
+    status = db.Column(db.String(20), nullable=False, default="queued")
+
+    requested_at = db.Column(db.DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+    started_at = db.Column(db.DateTime(timezone=True), nullable=True)
+    finished_at = db.Column(db.DateTime(timezone=True), nullable=True)
+
+    trigger_solve_id = db.Column(db.BigInteger, nullable=True)
+
+    error = db.Column(db.Text, nullable=True)
+
+    new_model_version = db.Column(db.String(100), nullable=True)
 

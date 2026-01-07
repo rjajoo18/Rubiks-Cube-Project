@@ -1,0 +1,22 @@
+{
+  "version": "global_v2",
+  "features": [
+    "effective_time_ms",
+    "has_plus2",
+    "ao5_ms",
+    "ao12_ms",
+    "baseline50_ms",
+    "std10_ms",
+    "ratio_vs_baseline",
+    "delta_vs_baseline_ms",
+    "skill_prior_ms",
+    "num_moves",
+    "solve_index"
+  ],
+  "labels": [
+    "y_time_ms",
+    "y_dnf",
+    "y_plus2"
+  ],
+  "notes": "Time regressor + DNF/+2 classifiers. Score computed from predicted time vs baseline."
+}

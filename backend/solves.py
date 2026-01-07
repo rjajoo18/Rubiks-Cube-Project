@@ -5,8 +5,9 @@ import random
 import base64
 
 from ml.inference.scorer import score_solve_gbm
+from ml.inference.scorer_v2 import score_solve_profile_v2
 from db import db
-from models import Solve
+from models import Solve, User, MLRetrainJob
 from auth import require_auth
 import pycuber as pc
 
@@ -298,8 +299,13 @@ def serialize_solve(s: Solve):
         "state": s.state,
         "solutionMoves": s.solution_moves,
         "numMoves": s.num_moves,
+
         "mlScore": s.ml_score,
         "scoreVersion": s.score_version,
+        "expectedTimeMs": s.expected_time_ms,
+        "dnfRisk": s.dnf_risk,
+        "plus2Risk": s.plus2_risk,
+
         "source": s.source,
         "createdAt": s.created_at.isoformat() if s.created_at else None,
     }
@@ -434,26 +440,26 @@ def create_timed_solve():
       - notes: string
       - tags: array
       - state: 54-char cube string (URFDLB blocks) if you want
-      - solutionMoves: array
+      - solutionMoves: array (or string depending on your storage)
       - numMoves: int
       - source: default "timer"
+
+    IMPORTANT DESIGN NOTES (so you learn what's going on):
+    - This endpoint ONLY saves the solve.
+    - We do NOT retrain ML here (that would block the user and crash your API).
+    - We do NOT score here either; scoring happens via POST /api/solves/<id>/score.
+      (Frontend calls it right after saving, so UX is still instant.)
+    - We enqueue retraining every 50 solves using a DB-backed job queue table.
     """
     user = request.current_user
     data = request.get_json() or {}
 
-    # Required
+    # -----------------------------
+    # 1) Parse required fields
+    # -----------------------------
     scramble = data.get("scramble")
     time_ms = data.get("timeMs")
     event = data.get("event", "3x3")
-
-    # Optional
-    penalty = data.get("penalty")
-    notes = data.get("notes", "")
-    tags = data.get("tags", [])
-    state = data.get("state", "")
-    solution_moves = data.get("solutionMoves", [])
-    num_moves = data.get("numMoves")
-    source = data.get("source", "timer")
 
     if event != "3x3":
         return jsonify({"error": "Only 3x3 supported for now"}), 400
@@ -463,11 +469,26 @@ def create_timed_solve():
 
     if time_ms is None:
         return jsonify({"error": "timeMs is required"}), 400
+
+    # Ensure timeMs is an integer (ms)
     try:
         time_ms = int(time_ms)
     except (ValueError, TypeError):
         return jsonify({"error": "timeMs must be an integer"}), 400
 
+    # -----------------------------
+    # 2) Parse optional fields
+    # -----------------------------
+    penalty = data.get("penalty")  # None | "+2" | "DNF"
+    notes = data.get("notes", "")
+    tags = data.get("tags", [])
+    state = data.get("state", "")
+    solution_moves = data.get("solutionMoves", [])
+    num_moves = data.get("numMoves")
+    source = data.get("source", "timer")
+
+    # Validate penalty exactly how your backend expects.
+    # (This is why frontend must send null for OK.)
     if penalty not in (None, "+2", "DNF"):
         return jsonify({"error": "penalty must be one of None, '+2', 'DNF'"}), 400
 
@@ -477,6 +498,9 @@ def create_timed_solve():
         if not valid:
             return jsonify({"error": f"Invalid cube state: {err}"}), 400
 
+    # -----------------------------
+    # 3) Create solve row
+    # -----------------------------
     new_solve = Solve(
         user_id=user.id,
         event=event,
@@ -486,21 +510,70 @@ def create_timed_solve():
         notes=notes,
         tags=tags,
         state=state,
+
+        # Store solution info if you have it
         solution_moves=solution_moves,
         num_moves=num_moves,
-        ml_score=None,  # computed below
+
+        # ML fields start null until scored by /score
+        ml_score=None,
         score_version=None,
+
+        # NEW v2 profile fields start null until scored by /score
+        expected_time_ms=None,
+        dnf_risk=None,
+        plus2_risk=None,
+
         source=source,
         created_at=datetime.utcnow(),
     )
 
-    # Compute heuristic score (placeholder for your ML model later)
-    new_solve.ml_score = heuristic_score(new_solve)
-    new_solve.score_version = "heuristic_v1"
-
+    # -----------------------------
+    # 4) Save solve
+    # -----------------------------
     db.session.add(new_solve)
+
+    # -----------------------------
+    # 5) Retrain trigger logic (every 50 solves)
+    # -----------------------------
+    # We increment a counter on the user.
+    # When it hits 50, we enqueue a background job and reset the counter.
+    #
+    # IMPORTANT:
+    # This does NOT run training here. It only records a job in the DB.
+    # A worker script will later pick it up and train safely.
+    try:
+        user.solves_since_retrain = (user.solves_since_retrain or 0) + 1
+
+        if user.solves_since_retrain >= 50:
+            # Create a queued job
+            job = MLRetrainJob(
+                user_id=user.id,
+                status="queued",
+                trigger_solve_id=new_solve.id,  # NOTE: id exists after flush/commit; see below
+            )
+
+            # To ensure new_solve.id exists before commit, we flush first.
+            db.session.flush()  # assigns new_solve.id without committing yet
+            job.trigger_solve_id = new_solve.id
+
+            db.session.add(job)
+
+            # Reset counter so next retrain happens after the next 50
+            user.solves_since_retrain = 0
+    except Exception as e:
+        # If retrain enqueue fails for any reason, we still want to save the solve.
+        # So we log but do NOT abort the request.
+        print("Warning: failed to enqueue retrain job:", e)
+
+    # -----------------------------
+    # 6) Commit transaction
+    # -----------------------------
     db.session.commit()
 
+    # -----------------------------
+    # 7) Return solve + live stats
+    # -----------------------------
     return (
         jsonify(
             {
@@ -602,19 +675,26 @@ def score_solve(solve_id: int):
     solve = Solve.query.filter_by(id=solve_id, user_id=user.id).first()
     if not solve:
         return jsonify({"error": "Solve not found"}), 404
-    
-    score, version = score_solve_gbm(db.session, user, solve)
 
-    solve.ml_score = score
+    ml_score, expected_time_ms, dnf_risk, plus2_risk, version = score_solve_profile_v2(db.session, user, solve)
+
+    # Save results on the solve row so frontend can display them later
+    solve.ml_score = float(ml_score)
     solve.score_version = version
+
+    solve.expected_time_ms = expected_time_ms
+    solve.dnf_risk = dnf_risk
+    solve.plus2_risk = plus2_risk
+
     db.session.commit()
 
-    return jsonify(
-        {
-            "mlScore": solve.ml_score,
-            "scoreVersion": solve.score_version
-        }
-    )
+    return jsonify({
+        "mlScore": solve.ml_score,
+        "scoreVersion": solve.score_version,
+        "expectedTimeMs": solve.expected_time_ms,
+        "dnfRisk": solve.dnf_risk,
+        "plus2Risk": solve.plus2_risk,
+    })
 
 # GET /api/solves
 @solves_bp.route("/solves", methods=["GET"])
