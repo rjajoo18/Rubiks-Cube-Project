@@ -1,4 +1,4 @@
-# Rubik’s Cube Project
+# Rubik’s Cube Training and Analytics Platform
 
 A full-stack Rubik’s Cube training and analytics platform that allows users to time solves, generate scrambles, compute optimal solutions, analyze performance trends, and score solves using heuristic and machine learning–based models.
 
