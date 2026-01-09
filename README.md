@@ -193,19 +193,30 @@ VITE_API_BASE_URL=http://localhost:5000/api
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| POST | /api/auth/register | Register new user |
+| POST | /api/auth/signup | Register new user |
 | POST | /api/auth/login | Login user |
 | GET | /api/auth/me | Get current user info |
+| POST | /api/auth/me/skill/self-reported | Set self-reported 3x3 average |
+| POST | /api/auth/me/skill/wca | Link WCA ID and fetch 3x3 stats (avg + single) |
 
-### Solves Endpoints
+### Solve + Scramble Endpoints
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | POST | /api/solves | Create new solve |
 | GET | /api/solves | Get all solves for user |
+| POST | /api/solves/:id/score | Calculate ML score for solve |
+| GET | /api/scramble | Generate a new scramble (+ cube state) for an event (currently 3x3 only) |
+| GET | /api/solves/:id | Get full solve details |
 | PATCH | /api/solves/:id | Update solve |
 | DELETE | /api/solves/:id | Delete solve |
-| POST | /api/solves/:id/score | Calculate ML score for solve |
+| GET | /api/solves/live-stats | Compute live stats from recent solves|
+| POST | /api/solves/optimal | Compute optimal solution from cube state |
+
+### Dashboard Endpoints
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | /api/dashboard/summary | Dashboard summary stats + daily trends (snapshot cached) |
 
 ### Cube Utilities
 
