@@ -106,9 +106,17 @@ export const SolverPage: React.FC = () => {
           const scoreRes = await apiClient.scoreSolve(response.solve.id);
           setLastSolve((prev) =>
             prev && prev.id === response.solve.id
-              ? { ...prev, mlScore: scoreRes.mlScore, scoreVersion: scoreRes.scoreVersion }
+              ? {
+                  ...prev,
+                  mlScore: scoreRes.mlScore,
+                  scoreVersion: scoreRes.scoreVersion,
+                  expectedTimeMs: scoreRes.expectedTimeMs,
+                  dnfRisk: scoreRes.dnfRisk,
+                  plus2Risk: scoreRes.plus2Risk,
+                }
               : prev
           );
+
           // (optional) refresh stats so avgScore updates quickly
           // If your live stats already include scoreStats, this keeps it fresh:
           void loadStats();
@@ -242,7 +250,14 @@ export const SolverPage: React.FC = () => {
       const result = await apiClient.scoreSolve(solveId);
       setLastSolve((prev) =>
         prev && prev.id === solveId
-          ? { ...prev, mlScore: result.mlScore, scoreVersion: result.scoreVersion }
+          ? {
+              ...prev,
+              mlScore: result.mlScore,
+              scoreVersion: result.scoreVersion,
+              expectedTimeMs: result.expectedTimeMs,
+              dnfRisk: result.dnfRisk,
+              plus2Risk: result.plus2Risk,
+            }
           : prev
       );
       void loadStats();
@@ -475,6 +490,35 @@ export const SolverPage: React.FC = () => {
                         Score This Solve
                       </Button>
                     )}
+
+                    {lastSolve.expectedTimeMs != null && (
+                      <div className="flex justify-between items-center">
+                        <span className="text-sm text-muted-foreground">Expected</span>
+                        <Badge variant="info">{formatMs(lastSolve.expectedTimeMs)}</Badge>
+                      </div>
+                    )}
+
+                    {lastSolve.dnfRisk != null && (
+                      <div className="flex justify-between items-center">
+                        <span className="text-sm text-muted-foreground">DNF Risk</span>
+                        <Badge variant="default">{Math.round(lastSolve.dnfRisk * 100)}%</Badge>
+                      </div>
+                    )}
+
+                    {lastSolve.plus2Risk != null && (
+                      <div className="flex justify-between items-center">
+                        <span className="text-sm text-muted-foreground">+2 Risk</span>
+                        <Badge variant="default">{Math.round(lastSolve.plus2Risk * 100)}%</Badge>
+                      </div>
+                    )}
+
+                    {lastSolve.scoreVersion && (
+                      <div className="flex justify-between items-center">
+                        <span className="text-sm text-muted-foreground">Model</span>
+                        <span className="text-sm text-foreground">{lastSolve.scoreVersion}</span>
+                      </div>
+                    )}
+
                   </div>
                 </Card>
               )}

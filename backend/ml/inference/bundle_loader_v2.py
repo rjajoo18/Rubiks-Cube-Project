@@ -3,7 +3,7 @@ import os
 import joblib
 from functools import lru_cache
 
-@lru_cache(maxsize=64)
+@lru_cache(maxsize=8)
 def load_bundle_for_version(version: str):
     """
     Load a model bundle by version and cache it.

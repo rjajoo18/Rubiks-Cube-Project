@@ -1,5 +1,14 @@
+// src/api/client.ts
 import axios, { AxiosInstance } from 'axios';
 import { User, Solve, LiveStats, DashboardSummary, Scramble, PaginatedSolves } from '@/types/api';
+
+type ScoreSolveResponse = {
+  mlScore: number;
+  scoreVersion: string;
+  expectedTimeMs: number | null;
+  dnfRisk: number;
+  plus2Risk: number;
+};
 
 class APIClient {
   private client: AxiosInstance;
@@ -109,7 +118,7 @@ class APIClient {
     return response.data;
   }
 
-  async scoreSolve(id: number): Promise<{ mlScore: number; scoreVersion: string }> {
+  async scoreSolve(id: number): Promise<ScoreSolveResponse> {
     // send {} explicitly (some servers expect a JSON body)
     const response = await this.client.post(`/solves/${id}/score`, {});
     return response.data;
@@ -135,7 +144,7 @@ class APIClient {
     skillSource: string;
     selfReported333AvgMs: number;
     skillPriorMs: number;
-    }> {
+  }> {
     const response = await this.client.post('/auth/me/skill/self-reported', { avgSeconds });
     return response.data;
   }
@@ -146,7 +155,7 @@ class APIClient {
     wca333SingleMs: number | null;
     skillSource: string;
     skillPriorMs: number | null;
-    }> {
+  }> {
     const response = await this.client.post('/auth/me/skill/wca', { wcaId });
     return response.data;
   }

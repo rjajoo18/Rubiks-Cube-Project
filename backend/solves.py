@@ -4,6 +4,7 @@ from collections import Counter
 import random
 import base64
 
+from dashboard import refresh_dashboard_snapshot
 from ml.inference.scorer import score_solve_gbm
 from ml.inference.scorer_v2 import score_solve_profile_v2
 from db import db
@@ -571,6 +572,10 @@ def create_timed_solve():
     # -----------------------------
     db.session.commit()
 
+    try:
+        refresh_dashboard_snapshot(user.id, "30d")
+    except Exception as e:
+        print("Warning: failed to refresh dashboard snapshot:", e)
     # -----------------------------
     # 7) Return solve + live stats
     # -----------------------------
@@ -687,6 +692,10 @@ def score_solve(solve_id: int):
     solve.plus2_risk = plus2_risk
 
     db.session.commit()
+    try:
+        refresh_dashboard_snapshot(user.id, "30d")
+    except Exception as e:
+        print("Warning: failed to refresh dashboard snapshot:", e)
 
     return jsonify({
         "mlScore": solve.ml_score,
@@ -723,12 +732,11 @@ def list_solves():
 
     penalty = request.args.get("penalty")
     if penalty:
-        q = q.filter_by(Solve.penalty == penalty)
+        q = q.filter(Solve.penalty == penalty)
 
     source = request.args.get("source")
     if source:
-        q = q.filter_by(Solve.source == source)
-
+        q = q.filter(Solve.source == source)
     has_score = request.args.get("hasScore")
     if has_score in ("true", "True", "1"):
         q = q.filter(Solve.ml_score.isnot(None))

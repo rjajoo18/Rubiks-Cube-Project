@@ -1,5 +1,3 @@
-# ml/training/build_dataset_v2.py
-
 from __future__ import annotations
 
 import os

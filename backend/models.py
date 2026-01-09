@@ -1,5 +1,7 @@
 from datetime import datetime, timezone
 from db import db
+from sqlalchemy.dialects.postgresql import JSONB
+
 
 # Defines User model in table
 class User(db.Model):
@@ -83,4 +85,19 @@ class MLRetrainJob(db.Model):
     error = db.Column(db.Text, nullable=True)
 
     new_model_version = db.Column(db.String(100), nullable=True)
+
+class DashboardSnapshot(db.Model):
+    __tablename__ = "dashboard_snapshots"
+
+    id = db.Column(db.BigInteger, primary_key=True)
+
+    user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False)
+    range_days = db.Column(db.Integer, nullable=False)
+
+    data = db.Column(JSONB, nullable=False)
+    updated_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+
+    __table_args__ = (
+        db.UniqueConstraint("user_id", "range_days", name="uq_dashboard_snapshot_user_range"),
+    )
 

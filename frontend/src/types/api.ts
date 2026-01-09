@@ -1,3 +1,5 @@
+// src/types/api.ts
+
 export interface User {
   id: number;
   email: string;
@@ -21,14 +23,19 @@ export interface Solve {
   notes: string | null;
   tags: string[] | null;
   state: string | null;
-  solutionMoves: string[] | null; // FIXED
+  solutionMoves: string[] | null;
   numMoves: number | null;
+
+  // ML outputs
   mlScore: number | null;
   scoreVersion: string | null;
+  expectedTimeMs: number | null;
+  dnfRisk: number | null;
+  plus2Risk: number | null;
+
   source: string;
   createdAt: string;
 }
-
 
 export interface LiveStats {
   count: number;

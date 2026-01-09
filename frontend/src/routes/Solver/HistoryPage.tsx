@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { apiClient } from "@/api/client";
 import { Solve } from "@/types/api";
-import { formatDisplayTime } from "@/utils/time";
+import { formatDisplayTime, formatMs } from "@/utils/time";
 import { Card } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
@@ -79,6 +79,14 @@ export const HistoryPage: React.FC = () => {
     const arr = normalizeSolutionMoves(moves);
     return arr.length ? arr.join(" ") : "";
   };
+
+const clamp01 = (x: number) => Math.max(0, Math.min(1, x));
+
+const formatPct = (x: number | null | undefined) => {
+  if (x == null || Number.isNaN(x)) return "—";
+  return `${Math.round(clamp01(x) * 100)}%`;
+};
+
 
   const loadSolves = async (reset: boolean) => {
     if (reset) setInitialLoading(true);
@@ -288,26 +296,43 @@ export const HistoryPage: React.FC = () => {
   };
 
   const handleScoreSolve = async (id: number) => {
-    setError("");
-    try {
-      const result = await apiClient.scoreSolve(id);
+  setError("");
+  try {
+    const result = await apiClient.scoreSolve(id);
 
-      setSolves((prev) =>
-        prev.map((s) =>
-          s.id === id ? { ...s, mlScore: result.mlScore, scoreVersion: result.scoreVersion } : s
-        )
-      );
+    setSolves((prev) =>
+      prev.map((s) =>
+        s.id === id
+          ? {
+              ...s,
+              mlScore: result.mlScore,
+              scoreVersion: result.scoreVersion,
+              expectedTimeMs: result.expectedTimeMs,
+              dnfRisk: result.dnfRisk,
+              plus2Risk: result.plus2Risk,
+            }
+          : s
+      )
+    );
 
-      setSelectedSolve((prev) =>
-        prev && prev.id === id
-          ? { ...prev, mlScore: result.mlScore, scoreVersion: result.scoreVersion }
-          : prev
-      );
-    } catch (err) {
-      console.error("Failed to score solve:", err);
-      setError("Failed to score solve.");
-    }
-  };
+    setSelectedSolve((prev) =>
+      prev && prev.id === id
+        ? {
+            ...prev,
+            mlScore: result.mlScore,
+            scoreVersion: result.scoreVersion,
+            expectedTimeMs: result.expectedTimeMs,
+            dnfRisk: result.dnfRisk,
+            plus2Risk: result.plus2Risk,
+          }
+        : prev
+    );
+  } catch (err) {
+    console.error("Failed to score solve:", err);
+    setError("Failed to score solve.");
+  }
+};
+
 
   const handleDeleteSolve = async (id: number) => {
     const ok = window.confirm("Delete this solve? This cannot be undone.");
@@ -462,9 +487,18 @@ export const HistoryPage: React.FC = () => {
                               <div className="flex items-center gap-2 mb-2 flex-wrap">
                                 <Badge variant="info">{formatDisplayTime(solve.timeMs ?? 0, solve.penalty)}</Badge>
                                 <Badge variant="default">{solve.source}</Badge>
-                                {solve.mlScore !== null && solve.mlScore !== undefined && (
-                                  <Badge variant="success">Score: {solve.mlScore.toFixed(2)}</Badge>
-                                )}
+                                  {solve.mlScore !== null && solve.mlScore !== undefined && (
+                                    <Badge variant="success">Score: {solve.mlScore.toFixed(2)}</Badge>
+                                  )}
+                                  {solve.expectedTimeMs != null && (
+                                    <Badge variant="info">Pred: {formatMs(solve.expectedTimeMs)}</Badge>
+                                  )}
+                                  {solve.dnfRisk != null && (
+                                    <Badge variant="default">DNF {formatPct(solve.dnfRisk)}</Badge>
+                                  )}
+                                  {solve.plus2Risk != null && (
+                                    <Badge variant="default">+2 {formatPct(solve.plus2Risk)}</Badge>
+                                  )}
                                 {solve.numMoves != null && <Badge variant="info">{solve.numMoves} moves</Badge>}
                               </div>
                               <p className="text-sm text-muted-foreground mb-1">{formatDateTime(solve.createdAt)}</p>
@@ -513,6 +547,31 @@ export const HistoryPage: React.FC = () => {
                 <Button variant="secondary" onClick={() => void handleScoreSolve(selectedSolve.id)} className="h-9">
                   Score This Solve
                 </Button>
+              )}
+              {selectedSolve.mlScore != null && (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 w-full">
+                  <Card className="border border-border/50 bg-card/40 p-4">
+                    <p className="text-xs text-muted-foreground mb-1">Expected Time</p>
+                    <p className="text-base font-semibold">
+                      {selectedSolve.expectedTimeMs != null ? formatMs(selectedSolve.expectedTimeMs) : "—"}
+                    </p>
+                  </Card>
+
+                  <Card className="border border-border/50 bg-card/40 p-4">
+                    <p className="text-xs text-muted-foreground mb-1">Model Version</p>
+                    <p className="text-base font-semibold">{selectedSolve.scoreVersion ?? "—"}</p>
+                  </Card>
+
+                  <Card className="border border-border/50 bg-card/40 p-4">
+                    <p className="text-xs text-muted-foreground mb-1">DNF Risk</p>
+                    <p className="text-base font-semibold">{formatPct(selectedSolve.dnfRisk)}</p>
+                  </Card>
+
+                  <Card className="border border-border/50 bg-card/40 p-4">
+                    <p className="text-xs text-muted-foreground mb-1">+2 Risk</p>
+                    <p className="text-base font-semibold">{formatPct(selectedSolve.plus2Risk)}</p>
+                  </Card>
+                </div>
               )}
 
               {detailsLoading && <span className="text-xs text-muted-foreground">Loading details…</span>}
