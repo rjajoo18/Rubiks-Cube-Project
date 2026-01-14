@@ -251,9 +251,6 @@ const FriendsPage: React.FC = () => {
           <div className="flex items-start justify-between gap-4">
             <div>
               <h1 className="text-3xl md:text-4xl font-bold mb-2">Friends</h1>
-              <p className="text-muted-foreground">
-                Friends list left. Stats + recent solves right.
-              </p>
             </div>
 
             <Button variant="ghost" onClick={() => void loadAll()} loading={loading}>
