@@ -5,30 +5,30 @@ import { formatDisplayTime, formatMs } from '@/utils/time';
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
-import { Input } from '@/components/ui/Input';
 
-type TimerState = 'idle' | 'ready' | 'inspection' | 'running' | 'stopped';
+type TimerState = 'idle' | 'arming' | 'ready' | 'inspection' | 'running' | 'stopped';
 
 const INSPECTION_MS = 15000;
 const LATE_PLUS2_MS = 2000;
+const ARMING_THRESHOLD_MS = 500; // Hold space for 500ms to arm
 
 export const SolverPage: React.FC = () => {
   const [scramble, setScramble] = useState<string>('');
-  const [scrambleState, setScrambleState] = useState<string>(''); // 54-char URFDLB
+  const [scrambleState, setScrambleState] = useState<string>(''); 
   const [timerState, setTimerState] = useState<TimerState>('idle');
   const [currentTime, setCurrentTime] = useState<number>(0);
   const [lastSolve, setLastSolve] = useState<Solve | null>(null);
   const [liveStats, setLiveStats] = useState<LiveStats | null>(null);
 
-  // penalty/notes UI
-  const [penalty, setPenalty] = useState<string>('OK');
-  const [notes, setNotes] = useState<string>('');
+  // Inspection setting
+  const [inspectionEnabled, setInspectionEnabled] = useState<boolean>(true);
 
-  // NEW: pending time to save after user chooses penalty/notes
-  const [pendingTimeMs, setPendingTimeMs] = useState<number | null>(null);
+  // Last solve penalty state (for after-save editing)
+  const [lastSolvePenalty, setLastSolvePenalty] = useState<string>('OK');
 
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string>('');
+  const [savingMessage, setSavingMessage] = useState<string>('');
 
   // Optimal solution UI
   const [optimalSolutionMoves, setOptimalSolutionMoves] = useState<string[] | null>(null);
@@ -41,6 +41,7 @@ export const SolverPage: React.FC = () => {
   const startTimeRef = useRef<number>(0);
   const animationFrameRef = useRef<number>(0);
   const spaceDownTimeRef = useRef<number>(0);
+  const armingTimeoutRef = useRef<number>(0);
 
   const inspectionStartRef = useRef<number>(0);
   const inspectionRafRef = useRef<number>(0);
@@ -55,6 +56,23 @@ export const SolverPage: React.FC = () => {
   useEffect(() => {
     loadingRef.current = loading;
   }, [loading]);
+
+  // Load inspection preference from localStorage
+  useEffect(() => {
+    const stored = localStorage.getItem('inspectionEnabled');
+    if (stored !== null) {
+      setInspectionEnabled(stored === 'true');
+    }
+  }, []);
+
+  // Save inspection preference
+  const toggleInspection = useCallback(() => {
+    setInspectionEnabled((prev) => {
+      const next = !prev;
+      localStorage.setItem('inspectionEnabled', String(next));
+      return next;
+    });
+  }, []);
 
   const loadNewScramble = useCallback(async () => {
     try {
@@ -83,35 +101,29 @@ export const SolverPage: React.FC = () => {
     void loadStats();
   }, [loadNewScramble, loadStats]);
 
-  const saveSolve = useCallback(
-    async (timeMs: number) => {
+  // AUTO-SAVE: Save solve immediately when timer stops
+  const saveSolveImmediately = useCallback(
+    async (timeMs: number, autoPenalty: string = 'OK') => {
       setLoading(true);
+      setSavingMessage('Saving...');
       setError('');
+      
       try {
-        // IMPORTANT:
-        // Keep penalty consistent with backend + ML pipeline:
-        // send "OK" / "+2" / "DNF" (not null)
         const response = await apiClient.createSolve({
           scramble,
           timeMs,
-          penalty: penalty === 'OK' ? null : penalty,
+          penalty: autoPenalty === 'OK' ? null : autoPenalty,
           source: 'timer',
-          notes: notes || undefined,
           event: '3x3',
           state: scrambleState || undefined,
         });
 
-        // Show solve immediately
         setLastSolve(response.solve);
+        setLastSolvePenalty(autoPenalty);
         setLiveStats(response.liveStats);
+        setSavingMessage('Saved ✓');
 
-        // Clear UI after successful save
-        setNotes('');
-        setPenalty('OK');
-        setPendingTimeMs(null);
-
-        // Kick off scoring in the background (do NOT block UX)
-        // If this fails, the "Score This Solve" button still works.
+        // Auto-score in background
         try {
           const scoreRes = await apiClient.scoreSolve(response.solve.id);
           setLastSolve((prev) =>
@@ -126,23 +138,23 @@ export const SolverPage: React.FC = () => {
                 }
               : prev
           );
-
-          // (optional) refresh stats so avgScore updates quickly
-          // If your live stats already include scoreStats, this keeps it fresh:
           void loadStats();
         } catch (err) {
           console.error('Auto-scoring failed:', err);
-          // Don't hard-error; user can manually score
         }
 
         await loadNewScramble();
+
+        // Clear saving message after delay
+        setTimeout(() => setSavingMessage(''), 2000);
       } catch {
         setError('Failed to save solve');
+        setSavingMessage('');
       } finally {
         setLoading(false);
       }
     },
-    [scramble, penalty, notes, scrambleState, loadNewScramble, loadStats]
+    [scramble, scrambleState, loadNewScramble, loadStats]
   );
 
   const stopInspection = useCallback(() => {
@@ -154,11 +166,6 @@ export const SolverPage: React.FC = () => {
 
   const startTimer = useCallback(() => {
     if (loadingRef.current) return;
-
-    // starting a new solve should clear any pending unsaved solve state
-    setPendingTimeMs(null);
-    setPenalty('OK');
-    setNotes('');
 
     if (animationFrameRef.current) {
       cancelAnimationFrame(animationFrameRef.current);
@@ -181,12 +188,6 @@ export const SolverPage: React.FC = () => {
   const startInspection = useCallback(() => {
     if (loadingRef.current) return;
 
-    // starting a new attempt clears pending solve state
-    setPendingTimeMs(null);
-    setPenalty('OK');
-    setNotes('');
-
-    // kill running timer RAF if somehow exists
     if (animationFrameRef.current) {
       cancelAnimationFrame(animationFrameRef.current);
       animationFrameRef.current = 0;
@@ -218,22 +219,11 @@ export const SolverPage: React.FC = () => {
   const beginSolveFromInspection = useCallback(() => {
     if (loadingRef.current) return;
 
-    const over = inspectionOverMs;
-
-    if (over > LATE_PLUS2_MS) {
-      setPenalty('DNF');
-    } else if (over > 0) {
-      setPenalty('+2');
-    } else {
-      setPenalty('OK');
-    }
-
     stopInspection();
     startTimer();
-  }, [inspectionOverMs, stopInspection, startTimer]);
+  }, [stopInspection, startTimer]);
 
-  // UPDATED: stop timer no longer saves immediately.
-  // Instead it sets pendingTimeMs and shows penalty/notes + Save Solve button.
+  // UPDATED: Auto-save and auto-reset on timer stop
   const stopTimer = useCallback(() => {
     if (animationFrameRef.current) {
       cancelAnimationFrame(animationFrameRef.current);
@@ -241,19 +231,38 @@ export const SolverPage: React.FC = () => {
     }
 
     const finalTime = Math.floor(performance.now() - startTimeRef.current);
-    setCurrentTime(finalTime);
-    setTimerState('stopped');
+    
+    // Determine auto-penalty from inspection
+    let autoPenalty = 'OK';
+    if (inspectionEnabled && inspectionOverMs > LATE_PLUS2_MS) {
+      autoPenalty = 'DNF';
+    } else if (inspectionEnabled && inspectionOverMs > 0) {
+      autoPenalty = '+2';
+    }
 
-    setPendingTimeMs(finalTime);
-  }, []);
+    // Save immediately and reset to idle
+    void saveSolveImmediately(finalTime, autoPenalty);
+    
+    // Reset timer to 0.0 immediately for next solve
+    setCurrentTime(0);
+    setTimerState('idle');
+  }, [saveSolveImmediately, inspectionOverMs, inspectionEnabled]);
 
   const handleSpaceDown = useCallback(() => {
     if (loadingRef.current) return;
 
     const state = timerStateRef.current;
+    
     if (state === 'idle') {
       spaceDownTimeRef.current = Date.now();
-      setTimerState('ready');
+      setTimerState('arming');
+      
+      // Start arming timeout
+      armingTimeoutRef.current = window.setTimeout(() => {
+        if (timerStateRef.current === 'arming') {
+          setTimerState('ready');
+        }
+      }, ARMING_THRESHOLD_MS);
     } else if (state === 'inspection') {
       beginSolveFromInspection();
     } else if (state === 'running') {
@@ -265,14 +274,27 @@ export const SolverPage: React.FC = () => {
     if (loadingRef.current) return;
 
     const state = timerStateRef.current;
-    if (state === 'ready') {
-      const holdTime = Date.now() - spaceDownTimeRef.current;
-      if (holdTime >= 300) startInspection();
-      else setTimerState('idle');
+    
+    // Clear arming timeout if we release early
+    if (armingTimeoutRef.current) {
+      clearTimeout(armingTimeoutRef.current);
+      armingTimeoutRef.current = 0;
     }
-  }, [startInspection]);
+    
+    if (state === 'arming') {
+      // Released too early - go back to idle
+      setTimerState('idle');
+    } else if (state === 'ready') {
+      // Released after arming - start inspection or timer
+      if (inspectionEnabled) {
+        startInspection();
+      } else {
+        startTimer();
+      }
+    }
+  }, [startInspection, startTimer, inspectionEnabled]);
 
-  // key listeners once
+  // Key listeners
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.code === 'Space') {
@@ -297,7 +319,7 @@ export const SolverPage: React.FC = () => {
     };
   }, [handleSpaceDown, handleSpaceUp]);
 
-  // cancel RAF on unmount only
+  // Cancel RAF on unmount
   useEffect(() => {
     return () => {
       if (animationFrameRef.current) {
@@ -308,21 +330,45 @@ export const SolverPage: React.FC = () => {
         cancelAnimationFrame(inspectionRafRef.current);
         inspectionRafRef.current = 0;
       }
+      if (armingTimeoutRef.current) {
+        clearTimeout(armingTimeoutRef.current);
+        armingTimeoutRef.current = 0;
+      }
     };
   }, []);
 
   const handleManualStart = () => {
     if (loading) return;
 
-    if (timerState === 'idle') startInspection();
-    else if (timerState === 'inspection') beginSolveFromInspection();
-    else if (timerState === 'running') stopTimer();
+    if (timerState === 'idle') {
+      if (inspectionEnabled) startInspection();
+      else startTimer();
+    } else if (timerState === 'inspection') {
+      beginSolveFromInspection();
+    } else if (timerState === 'running') {
+      stopTimer();
+    }
   };
 
-  const handleSavePendingSolve = useCallback(() => {
-    if (pendingTimeMs == null) return;
-    void saveSolve(pendingTimeMs);
-  }, [pendingTimeMs, saveSolve]);
+  const handleUpdateLastSolvePenalty = async (newPenalty: string) => {
+    if (!lastSolve) return;
+    
+    setLoading(true);
+    setError('');
+    
+    try {
+      await apiClient.updateSolve(lastSolve.id, {
+        penalty: newPenalty === 'OK' ? null : newPenalty,
+      });
+      
+      setLastSolvePenalty(newPenalty);
+      void loadStats();
+    } catch {
+      setError('Failed to update penalty');
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const handleScoreSolve = async (solveId: number) => {
     try {
@@ -381,30 +427,11 @@ export const SolverPage: React.FC = () => {
   };
 
   const getTimerColor = () => {
+    if (timerState === 'arming') return 'text-yellow-500';
     if (timerState === 'ready') return 'text-green-400';
     if (timerState === 'inspection') return 'text-yellow-300';
     if (timerState === 'running') return 'text-white';
-    if (timerState === 'stopped') return 'text-blue-400';
     return 'text-muted-foreground';
-  };
-
-  // UPDATED: banner should show while saving a stopped/pending solve
-  const showSavingBanner = loading && timerState === 'stopped';
-
-  const handleReset = () => {
-    if (loading) return;
-
-    if (inspectionRafRef.current) {
-      cancelAnimationFrame(inspectionRafRef.current);
-      inspectionRafRef.current = 0;
-    }
-
-    setTimerState('idle');
-    setPendingTimeMs(null);
-    setPenalty('OK');
-    setNotes('');
-    setInspectionMsLeft(INSPECTION_MS);
-    setInspectionOverMs(0);
   };
 
   const renderMainTime = () => {
@@ -415,13 +442,31 @@ export const SolverPage: React.FC = () => {
     return formatMs(currentTime);
   };
 
+  const getTimerInstruction = () => {
+    if (timerState === 'arming') return 'Keep holding...';
+    if (timerState === 'ready') return 'Release to start';
+    if (timerState === 'inspection') return 'Press space to solve';
+    if (timerState === 'running') return 'Press space to stop';
+    return inspectionEnabled ? 'Hold space to start' : 'Hold space to start';
+  };
+
   return (
     <div className="min-h-screen bg-background">
       <main className="max-w-7xl mx-auto px-4 py-6">
         <div className="space-y-6 animate-fade-in">
-          <div className="mb-8">
-            <h1 className="text-3xl md:text-4xl font-bold mb-2">Timer</h1>
-            <p className="text-muted-foreground">Press and hold spacebar to start</p>
+          <div className="mb-8 flex justify-between items-start">
+            <div>
+              <h1 className="text-3xl md:text-4xl font-bold mb-2">Timer</h1>
+              <p className="text-muted-foreground">{getTimerInstruction()}</p>
+            </div>
+            
+            <Button
+              variant={inspectionEnabled ? 'primary' : 'secondary'}
+              onClick={toggleInspection}
+              disabled={timerState === 'running'}
+            >
+              Inspection: {inspectionEnabled ? 'ON' : 'OFF'}
+            </Button>
           </div>
 
           {error && (
@@ -430,12 +475,9 @@ export const SolverPage: React.FC = () => {
             </Card>
           )}
 
-          {showSavingBanner && (
+          {savingMessage && (
             <Card className="border border-border/50 bg-card/60 backdrop-blur">
-              <div className="flex items-center gap-3">
-                <div className="w-4 h-4 border-2 border-primary/30 border-t-primary rounded-full animate-spin" />
-                <p className="text-foreground">Saving solve...</p>
-              </div>
+              <p className="text-foreground">{savingMessage}</p>
             </Card>
           )}
 
@@ -494,61 +536,11 @@ export const SolverPage: React.FC = () => {
                   <Button
                     variant={timerState === 'running' ? 'secondary' : 'primary'}
                     onClick={handleManualStart}
-                    disabled={timerState === 'stopped' || loading}
+                    disabled={loading}
                   >
                     {timerState === 'running' ? 'Stop' : 'Start'}
                   </Button>
-
-                  {timerState === 'stopped' && (
-                    <Button variant="ghost" onClick={handleReset} disabled={loading}>
-                      Reset
-                    </Button>
-                  )}
                 </div>
-
-                {timerState === 'stopped' && (
-                  <div className="space-y-4 pt-6 border-t border-border/50">
-                    <div className="grid grid-cols-3 gap-3">
-                      <Button
-                        variant={penalty === 'OK' ? 'primary' : 'ghost'}
-                        onClick={() => setPenalty('OK')}
-                        disabled={loading}
-                      >
-                        OK
-                      </Button>
-                      <Button
-                        variant={penalty === '+2' ? 'primary' : 'ghost'}
-                        onClick={() => setPenalty('+2')}
-                        disabled={loading}
-                      >
-                        +2
-                      </Button>
-                      <Button
-                        variant={penalty === 'DNF' ? 'primary' : 'ghost'}
-                        onClick={() => setPenalty('DNF')}
-                        disabled={loading}
-                      >
-                        DNF
-                      </Button>
-                    </div>
-
-                    <Input
-                      placeholder="Notes (optional)"
-                      value={notes}
-                      onChange={(e: React.ChangeEvent<HTMLInputElement>) => setNotes(e.target.value)}
-                      disabled={loading}
-                    />
-
-                    <Button
-                      variant="primary"
-                      onClick={handleSavePendingSolve}
-                      disabled={loading || pendingTimeMs == null}
-                      className="w-full"
-                    >
-                      Save Solve
-                    </Button>
-                  </div>
-                )}
               </Card>
 
               {lastSolve && (
@@ -558,8 +550,35 @@ export const SolverPage: React.FC = () => {
                     <div className="flex justify-between items-center">
                       <span className="text-sm text-muted-foreground">Time</span>
                       <Badge variant="info">
-                        {formatDisplayTime(lastSolve.timeMs, lastSolve.penalty)}
+                        {formatDisplayTime(lastSolve.timeMs, lastSolvePenalty)}
                       </Badge>
+                    </div>
+
+                    <div className="grid grid-cols-3 gap-3">
+                      <Button
+                        variant={lastSolvePenalty === 'OK' ? 'primary' : 'ghost'}
+                        onClick={() => void handleUpdateLastSolvePenalty('OK')}
+                        disabled={loading}
+                        className="h-9"
+                      >
+                        OK
+                      </Button>
+                      <Button
+                        variant={lastSolvePenalty === '+2' ? 'primary' : 'ghost'}
+                        onClick={() => void handleUpdateLastSolvePenalty('+2')}
+                        disabled={loading}
+                        className="h-9"
+                      >
+                        +2
+                      </Button>
+                      <Button
+                        variant={lastSolvePenalty === 'DNF' ? 'primary' : 'ghost'}
+                        onClick={() => void handleUpdateLastSolvePenalty('DNF')}
+                        disabled={loading}
+                        className="h-9"
+                      >
+                        DNF
+                      </Button>
                     </div>
 
                     <div className="flex justify-between items-center">
@@ -570,10 +589,33 @@ export const SolverPage: React.FC = () => {
                     </div>
 
                     {lastSolve.mlScore !== null && (
-                      <div className="flex justify-between items-center">
-                        <span className="text-sm text-muted-foreground">Score</span>
-                        <Badge variant="success">{lastSolve.mlScore.toFixed(2)}</Badge>
-                      </div>
+                      <>
+                        <div className="flex justify-between items-center">
+                          <span className="text-sm text-muted-foreground">Score</span>
+                          <Badge variant="success">{lastSolve.mlScore.toFixed(2)}</Badge>
+                        </div>
+                        
+                        {lastSolve.expectedTimeMs != null && (
+                          <div className="flex justify-between items-center">
+                            <span className="text-sm text-muted-foreground">Expected</span>
+                            <Badge variant="info">{formatMs(lastSolve.expectedTimeMs)}</Badge>
+                          </div>
+                        )}
+
+                        {lastSolve.dnfRisk != null && (
+                          <div className="flex justify-between items-center">
+                            <span className="text-sm text-muted-foreground">DNF Risk</span>
+                            <Badge variant="default">{Math.round(lastSolve.dnfRisk * 100)}%</Badge>
+                          </div>
+                        )}
+
+                        {lastSolve.plus2Risk != null && (
+                          <div className="flex justify-between items-center">
+                            <span className="text-sm text-muted-foreground">+2 Risk</span>
+                            <Badge variant="default">{Math.round(lastSolve.plus2Risk * 100)}%</Badge>
+                          </div>
+                        )}
+                      </>
                     )}
 
                     {lastSolve.mlScore === null && (
@@ -585,34 +627,6 @@ export const SolverPage: React.FC = () => {
                       >
                         Score This Solve
                       </Button>
-                    )}
-
-                    {lastSolve.expectedTimeMs != null && (
-                      <div className="flex justify-between items-center">
-                        <span className="text-sm text-muted-foreground">Expected</span>
-                        <Badge variant="info">{formatMs(lastSolve.expectedTimeMs)}</Badge>
-                      </div>
-                    )}
-
-                    {lastSolve.dnfRisk != null && (
-                      <div className="flex justify-between items-center">
-                        <span className="text-sm text-muted-foreground">DNF Risk</span>
-                        <Badge variant="default">{Math.round(lastSolve.dnfRisk * 100)}%</Badge>
-                      </div>
-                    )}
-
-                    {lastSolve.plus2Risk != null && (
-                      <div className="flex justify-between items-center">
-                        <span className="text-sm text-muted-foreground">+2 Risk</span>
-                        <Badge variant="default">{Math.round(lastSolve.plus2Risk * 100)}%</Badge>
-                      </div>
-                    )}
-
-                    {lastSolve.scoreVersion && (
-                      <div className="flex justify-between items-center">
-                        <span className="text-sm text-muted-foreground">Model</span>
-                        <span className="text-sm text-foreground">{lastSolve.scoreVersion}</span>
-                      </div>
                     )}
                   </div>
                 </Card>

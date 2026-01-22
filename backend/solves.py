@@ -3,6 +3,8 @@ from datetime import datetime
 from collections import Counter
 import random
 import base64
+import subprocess
+import os
 
 from dashboard import refresh_dashboard_snapshot
 from ml.inference.scorer import score_solve_gbm
@@ -33,7 +35,55 @@ def ping():
 
 
 # ----------------------------
-# SCRAMBLE GENERATION
+# TNOODLE SCRAMBLE GENERATION
+# ----------------------------
+def generate_scramble_tnoodle() -> str:
+    """
+    Generate a scramble using TNoodle JAR.
+    Falls back to basic scramble if TNoodle is not available.
+    """
+    try:
+        # Try to find TNoodle JAR in common locations
+        tnoodle_paths = [
+            os.path.join(os.path.dirname(__file__), 'tnoodle.jar'),
+            '/usr/local/bin/tnoodle.jar',
+            './tnoodle.jar',
+        ]
+        
+        tnoodle_jar = None
+        for path in tnoodle_paths:
+            if os.path.exists(path):
+                tnoodle_jar = path
+                break
+        
+        if not tnoodle_jar:
+            print("TNoodle JAR not found, falling back to basic scramble")
+            return generate_scramble_3x3()
+        
+        # Run TNoodle to generate scramble
+        # Format: java -jar tnoodle.jar scramble -p 333
+        result = subprocess.run(
+            ['java', '-jar', tnoodle_jar, 'scramble', '-p', '333'],
+            capture_output=True,
+            text=True,
+            timeout=5
+        )
+        
+        if result.returncode == 0:
+            scramble = result.stdout.strip()
+            if scramble:
+                return scramble
+        
+        print(f"TNoodle failed (code {result.returncode}), falling back to basic scramble")
+        return generate_scramble_3x3()
+        
+    except Exception as e:
+        print(f"TNoodle error: {e}, falling back to basic scramble")
+        return generate_scramble_3x3()
+
+
+# ----------------------------
+# BASIC SCRAMBLE GENERATION (FALLBACK)
 # ----------------------------
 def generate_scramble_3x3(length: int = 20) -> str:
     """
@@ -336,7 +386,7 @@ def heuristic_score(s: Solve) -> float:
 @require_auth
 def get_scramble():
     """
-    Return a new scramble string. For now only 3x3 is supported.
+    Return a new scramble string using TNoodle (falls back to basic if unavailable).
     """
     _user = request.current_user  # forces auth; not used otherwise
 
@@ -344,7 +394,7 @@ def get_scramble():
     if event != "3x3":
         return jsonify({"error": "Only 3x3 supported for now"}), 400
 
-    scr = generate_scramble_3x3()
+    scr = generate_scramble_tnoodle()
     state = scramble_to_state_urfdlb(scr)
 
     return jsonify({"scramble": scr, "event": event, "state": state})
@@ -808,4 +858,3 @@ def optimal_solution():
         return jsonify({"error": "This cube configuration cannot be solved."}), 400
 
     return jsonify({"solutionMoves": solution_moves, "numMoves": len(solution_moves)})
-
