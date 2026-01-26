@@ -23,84 +23,70 @@ import kociemba
 
 solves_bp = Blueprint("solves", __name__)
 
-# Legal moves used to generate random scrambles.
-MOVES = ["R", "L", "U", "D", "F", "B"]
-MODS = ["", "'", "2"]
-
 
 @solves_bp.route("/ping", methods=["GET"])
 def ping():
     """Simple health check route for debugging."""
     return {"ok": True}
 
+import random
 
 # ----------------------------
-# TNOODLE SCRAMBLE GENERATION
+# WCA-STYLE SCRAMBLE GENERATION (NO TNOODLE)
 # ----------------------------
-def generate_scramble_tnoodle() -> str:
-    """
-    Generate a scramble using TNoodle JAR.
-    Falls back to basic scramble if TNoodle is not available.
-    """
-    try:
-        # Try to find TNoodle JAR in common locations
-        tnoodle_paths = [
-            os.path.join(os.path.dirname(__file__), 'tnoodle.jar'),
-            '/usr/local/bin/tnoodle.jar',
-            './tnoodle.jar',
-        ]
-        
-        tnoodle_jar = None
-        for path in tnoodle_paths:
-            if os.path.exists(path):
-                tnoodle_jar = path
-                break
-        
-        if not tnoodle_jar:
-            print("TNoodle JAR not found, falling back to basic scramble")
-            return generate_scramble_3x3()
-        
-        # Run TNoodle to generate scramble
-        # Format: java -jar tnoodle.jar scramble -p 333
-        result = subprocess.run(
-            ['java', '-jar', tnoodle_jar, 'scramble', '-p', '333'],
-            capture_output=True,
-            text=True,
-            timeout=5
-        )
-        
-        if result.returncode == 0:
-            scramble = result.stdout.strip()
-            if scramble:
-                return scramble
-        
-        print(f"TNoodle failed (code {result.returncode}), falling back to basic scramble")
-        return generate_scramble_3x3()
-        
-    except Exception as e:
-        print(f"TNoodle error: {e}, falling back to basic scramble")
-        return generate_scramble_3x3()
+
+# Legal moves used to generate random scrambles.
+MOVES = ["R", "L", "U", "D", "F", "B"]
+MODS = ["", "'", "2"]
+
+# Face -> axis mapping. Opposite faces share an axis.
+_AXIS = {
+    "R": "x", "L": "x",
+    "U": "y", "D": "y",
+    "F": "z", "B": "z",
+}
 
 
-# ----------------------------
-# BASIC SCRAMBLE GENERATION (FALLBACK)
-# ----------------------------
-def generate_scramble_3x3(length: int = 20) -> str:
+def generate_scramble() -> str:
     """
-    Generate a random scramble string of the given length.
-    NOTE: This is a simple generator that avoids repeating the same face twice in a row.
-    It does not enforce WCA scramble rules beyond that.
+    Main entrypoint used by the app.
+    Generates a WCA-style 3x3 scramble (no TNoodle dependency).
     """
-    scramble = []
-    prev_move = None
+    return generate_scramble_3x3()
+
+
+def generate_scramble_3x3(length: int = 25) -> str:
+    """
+    Generate a WCA-style random scramble string of the given length.
+
+    Enforced constraints (matches common official scramble style rules):
+    - No repeating the same face twice in a row (e.g., "R R2" is invalid)
+    - No repeating the same axis twice in a row (e.g., "R L R2" is invalid)
+      Axes: {R,L}=x, {U,D}=y, {F,B}=z
+
+    This is not TNoodle-certified, but it fixes the "R L R2" and similar issues
+    and produces realistic scrambles.
+    """
+    scramble: list[str] = []
+
+    prev_face: str | None = None
+    prev_axis: str | None = None
 
     for _ in range(length):
-        move = random.choice(MOVES)
-        while move == prev_move:
-            move = random.choice(MOVES)
+        # Only allow faces that don't repeat face or axis
+        candidates = [
+            m for m in MOVES
+            if (prev_face is None or m != prev_face)
+            and (prev_axis is None or _AXIS[m] != prev_axis)
+        ]
+
+        face = random.choice(candidates)
         mod = random.choice(MODS)
-        scramble.append(move + mod)
-        prev_move = move
+
+        scramble.append(face + mod)
+
+        prev_face = face
+        prev_axis = _AXIS[face]
 
     return " ".join(scramble)
 
@@ -386,7 +372,7 @@ def heuristic_score(s: Solve) -> float:
 @require_auth
 def get_scramble():
     """
-    Return a new scramble string using TNoodle (falls back to basic if unavailable).
+    Return a new scramble string.
     """
     _user = request.current_user  # forces auth; not used otherwise
 
@@ -394,12 +380,10 @@ def get_scramble():
     if event != "3x3":
         return jsonify({"error": "Only 3x3 supported for now"}), 400
 
-    scr = generate_scramble_tnoodle()
+    scr = generate_scramble()
     state = scramble_to_state_urfdlb(scr)
 
     return jsonify({"scramble": scr, "event": event, "state": state})
-
-
 
 
 # POST /api/solves
