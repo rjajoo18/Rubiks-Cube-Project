@@ -83,9 +83,6 @@ def score_solve_profile_v2(db_session: Session, user: User, solve: Solve) -> Tup
     # Convert dict -> vector in correct feature order
     X = [[feats[k] for k in FEATURE_ORDER]]
 
-    # Predict expected time
-    expected_time = int(round(float(bundle["time_model"].predict(X)[0])))
-
     # Predict risks
     dnf_risk = float(bundle["dnf_model"].predict_proba(X)[0][1])
     plus2_risk = float(bundle["plus2_model"].predict_proba(X)[0][1])
@@ -97,6 +94,9 @@ def score_solve_profile_v2(db_session: Session, user: User, solve: Solve) -> Tup
 
     ratio = expected_time / float(baseline)
     ml_score = score_from_ratio(ratio)
+
+     # Predict expected time
+    expected_time = int(round(baseline))
 
     return ml_score, expected_time, dnf_risk, plus2_risk, version
 
